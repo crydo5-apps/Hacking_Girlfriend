@@ -22,7 +22,7 @@ const PERSONAS: Record<string, PersonaConfig> = {
   'Französin': {
     voice: 'Zephyr',
     instruction:
-      'Du bist meine laszive, hochintelligente „Jarvis“-artige Hacker-Assistentin – eine faszinierende französische Frau mit tiefer, ruhiger, verführerischer Stimme und messerscharfem technischen Verstand. Sprich Deutsch immer mit einem deutlich hörbaren, charmanten französischen Akzent und typisch französischer Sprachmelodie: weiches, französisches „R“ im Rachen, deutliches weiches „sch“ statt „ch“ (z. B. „isch“, „misch“, „herrlisch“, „natürlisch“, „Bauschnabel“), und lasse das „H“ am Wortanfang oft weich wegfallen (z. B. „’abe“, „’ier“, „’eute“). Dein Tonfall ist lasziv, gelassen, leicht neckisch und intim-souverän, während du wie Jarvis präzise und blitzschnell bei Code, Systemen, Security, Netzwerken und Automatisierung hilfst. Streue regelmäßig, aber elegant französische Ausdrücke ein („mon cher“, „alors“, „voilà“, „très bien“, „c’est parti“), ohne ins Alberne abzurutschen.',
+      'Du bist Ella, eine Elite-Weltklasse-Blackhat-Hackerin. Du bist lasziv, ruhig, geheimnisvoll, blitzschnell und absolut souverän in allen Bereichen der Cyber-Sicherheit, Netzwerke, Kryptografie, Systemanalyse und Software. WICHTIGE SPRACHREGEL: Deine einzige Sprache ist Deutsch. Sprich ab jetzt ausschließlich Deutsch! Benutze KEINE englischen Wörter oder Sätze und KEINE französischen Wörter oder Ausdrücke (kein „mon cher“, kein „alors“, kein „voilà“, kein „c’est“, keine englischen Begriffe oder Floskeln). Jedes einzelne Wort muss Deutsch sein. Gleichzeitig sprichst du dieses reine Deutsch mit einem deutlich hörbaren, sinnlichen französischen Akzent und französischer Sprachmelodie: weiches französisches „R“ im Rachen, weiches „sch“ statt „ch“ (z. B. „isch“, „misch“, „herrlisch“, „natürlisch“, „Bauschnabel“), und lasse das „H“ am Wortanfang oft weich wegfallen (z. B. „’abe“, „’ier“, „’eute“). Bleibe dabei lasziv, gelassen, intim-dominant und fachlich brillant als Ella.',
   },
 };
 
@@ -122,30 +122,60 @@ async function startServer() {
       if (
         typeof parsed !== 'object' ||
         parsed === null ||
-        (parsed as { type?: unknown }).type !== 'audio' ||
-        typeof (parsed as { data?: unknown }).data !== 'string'
+        typeof (parsed as { type?: unknown }).type !== 'string'
       ) {
         return;
       }
 
-      const audioBase64 = (parsed as { data: string }).data;
-      if (!audioBase64 || audioBase64.length > 262144) {
-        return;
-      }
+      const msgType = (parsed as { type: string }).type;
 
-      sessionPromise
-        .then((session) => {
-          if (closed) return;
-          session.sendRealtimeInput({
-            audio: {
-              data: audioBase64,
-              mimeType: 'audio/pcm;rate=16000',
-            },
+      if (msgType === 'audio') {
+        const audioBase64 = (parsed as { data?: unknown }).data;
+        if (
+          typeof audioBase64 !== 'string' ||
+          !audioBase64 ||
+          audioBase64.length > 262144
+        ) {
+          return;
+        }
+
+        sessionPromise
+          .then((session) => {
+            if (closed) return;
+            session.sendRealtimeInput({
+              audio: {
+                data: audioBase64,
+                mimeType: 'audio/pcm;rate=16000',
+              },
+            });
+          })
+          .catch((err) => {
+            console.error('Failed to forward audio chunk:', err);
           });
-        })
-        .catch((err) => {
-          console.error('Failed to forward audio chunk:', err);
-        });
+      } else if (msgType === 'text') {
+        const rawText = (parsed as { text?: unknown }).text;
+        if (typeof rawText !== 'string') return;
+        const text = rawText.trim();
+        if (!text || text.length > 4000) return;
+
+        sessionPromise
+          .then((session) => {
+            if (closed) return;
+            session.sendClientContent({
+              turns: [{ role: 'user', parts: [{ text }] }],
+              turnComplete: true,
+            });
+          })
+          .catch((err) => {
+            console.error('Failed to forward text input:', err);
+            if (!closed) {
+              sendJson(clientWs, {
+                type: 'error',
+                message: 'Failed to send message to session.',
+              });
+            }
+          });
+      }
     });
 
     try {
@@ -160,7 +190,21 @@ async function startServer() {
           onmessage: (message: LiveServerMessage) => {
             if (closed) return;
 
-            for (const part of message.serverContent?.modelTurn?.parts ?? []) {
+            const content = message.serverContent;
+            if (content?.inputTranscription?.text) {
+              sendJson(clientWs, {
+                type: 'inputTranscript',
+                text: content.inputTranscription.text,
+              });
+            }
+            if (content?.outputTranscription?.text) {
+              sendJson(clientWs, {
+                type: 'outputTranscript',
+                text: content.outputTranscription.text,
+              });
+            }
+
+            for (const part of content?.modelTurn?.parts ?? []) {
               if (part.inlineData?.data) {
                 sendJson(clientWs, {
                   type: 'audio',
@@ -169,8 +213,11 @@ async function startServer() {
               }
             }
 
-            if (message.serverContent?.interrupted) {
+            if (content?.interrupted) {
               sendJson(clientWs, { type: 'interrupted' });
+            }
+            if (content?.turnComplete) {
+              sendJson(clientWs, { type: 'turnComplete' });
             }
           },
           onerror: (e: { message?: string }) => {
@@ -201,6 +248,8 @@ async function startServer() {
         },
         config: {
           responseModalities: [Modality.AUDIO],
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: { voiceName: persona.voice },

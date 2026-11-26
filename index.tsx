@@ -11,14 +11,27 @@ import {createBlob, decode, decodeAudioData} from './utils';
 import './visual-3d';
 import type {OrbStyle} from './visual-3d';
 
+interface ChatMessage {
+  id: number;
+  role: 'user' | 'ella';
+  text: string;
+  final: boolean;
+}
+
 @customElement('gdm-live-audio')
 export class GdmLiveAudio extends LitElement {
   @state() isRecording = false;
+  @state() isProcessing = false;
   @state() status = '';
   @state() error = '';
+  @state() textInput = '';
   @state() orbStyle: OrbStyle = 'reactive';
+  @state() messages: ChatMessage[] = [];
+  @state() isHistoryOpen = true;
 
+  private nextMessageId = 1;
   private ws: WebSocket | null = null;
+  private pendingTextQueue: string[] = [];
   // Fix webkitAudioContext error by casting window to any
   private inputAudioContext = new ((window as any).AudioContext ||
     (window as any).webkitAudioContext)({sampleRate: 16000});
@@ -35,7 +48,7 @@ export class GdmLiveAudio extends LitElement {
   static styles = css`
     #status {
       position: absolute;
-      bottom: 5vh;
+      bottom: 2.5vh;
       left: 0;
       right: 0;
       z-index: 10;
@@ -49,14 +62,179 @@ export class GdmLiveAudio extends LitElement {
     .controls {
       z-index: 10;
       position: absolute;
-      bottom: 10vh;
+      bottom: 6.5vh;
       left: 0;
       right: 0;
+      padding: 0 16px;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-direction: column;
-      gap: 20px;
+      gap: 14px;
+    }
+
+    @keyframes inputFadeIn {
+      0% {
+        opacity: 0.45;
+        transform: translateY(8px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .chat-history {
+      z-index: 10;
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: min(360px, calc(100vw - 40px));
+      background: rgba(16, 12, 20, 0.52);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 16px;
+      color: white;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+      box-sizing: border-box;
+      transition: all 0.25s ease;
+    }
+
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 12px;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    .chat-history.collapsed .chat-header {
+      border-bottom: none;
+    }
+
+    .history-toggle {
+      width: auto;
+      height: auto;
+      border-radius: 8px;
+      padding: 4px 10px;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .chat-messages {
+      max-height: 32vh;
+      overflow-y: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+    }
+
+    .chat-empty {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.45);
+      margin: 4px 0;
+    }
+
+    .chat-message {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+
+    .chat-message.user {
+      align-self: flex-end;
+      max-width: 85%;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .chat-message.ella {
+      align-self: flex-start;
+      max-width: 88%;
+      background: rgba(124, 58, 237, 0.22);
+      border: 1px solid rgba(167, 139, 250, 0.28);
+    }
+
+    .chat-role {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.7px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .text-input-form {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      max-width: 440px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 6px 6px 6px 16px;
+      box-sizing: border-box;
+      opacity: 0.65;
+      transform: translateY(4px);
+      transition: opacity 0.35s ease, transform 0.35s ease, background 0.25s ease, border-color 0.25s ease, box-shadow 0.35s ease;
+
+      &:hover,
+      &:focus-within {
+        opacity: 1;
+        transform: translateY(0);
+        background: rgba(255, 255, 255, 0.15);
+        border-color: rgba(255, 255, 255, 0.45);
+      }
+
+      &.active {
+        opacity: 1;
+        transform: translateY(0);
+        animation: inputFadeIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+        border-color: rgba(255, 255, 255, 0.36);
+        box-shadow: 0 0 20px rgba(167, 139, 250, 0.15);
+      }
+
+      input {
+        flex: 1;
+        min-width: 0;
+        background: transparent;
+        border: none;
+        outline: none;
+        color: white;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-size: 14px;
+
+        &::placeholder {
+          color: rgba(255, 255, 255, 0.55);
+        }
+      }
+
+      .send-button {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.14);
+      }
     }
 
     .button-group {
@@ -190,6 +368,49 @@ export class GdmLiveAudio extends LitElement {
     this.nextStartTime = 0;
   }
 
+  private appendTranscript(role: 'user' | 'ella', chunk: string) {
+    if (!chunk) return;
+    const updated = [...this.messages];
+    const last = updated[updated.length - 1];
+
+    if (last && last.role === role && !last.final) {
+      updated[updated.length - 1] = {
+        ...last,
+        text: `${last.text}${chunk}`,
+      };
+    } else {
+      for (let i = 0; i < updated.length; i++) {
+        if (!updated[i].final) {
+          updated[i] = {...updated[i], final: true};
+        }
+      }
+      updated.push({
+        id: this.nextMessageId++,
+        role,
+        text: chunk.trimStart(),
+        final: false,
+      });
+    }
+
+    this.messages = updated;
+  }
+
+  private finalizeMessages() {
+    if (!this.messages.some((m) => !m.final)) return;
+    this.messages = this.messages.map((m) =>
+      m.final ? m : {...m, final: true},
+    );
+  }
+
+  protected updated(changedProperties: Map<string, unknown>) {
+    if (changedProperties.has('messages') || changedProperties.has('isHistoryOpen')) {
+      const container = this.renderRoot.querySelector('.chat-messages');
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+  }
+
   private initSession() {
     this.closeCurrentSocket();
     this.updateError('');
@@ -201,6 +422,16 @@ export class GdmLiveAudio extends LitElement {
       const ws = new WebSocket(wsUrl);
       this.ws = ws;
 
+      ws.onopen = () => {
+        if (this.ws !== ws) return;
+        while (this.pendingTextQueue.length > 0 && ws.readyState === WebSocket.OPEN) {
+          const text = this.pendingTextQueue.shift();
+          if (text) {
+            ws.send(JSON.stringify({type: 'text', text}));
+          }
+        }
+      };
+
       ws.onmessage = async (event: MessageEvent) => {
         if (this.ws !== ws) return;
 
@@ -209,6 +440,7 @@ export class GdmLiveAudio extends LitElement {
           status?: string;
           message?: string;
           data?: string;
+          text?: string;
         };
         try {
           msg = JSON.parse(event.data);
@@ -219,8 +451,16 @@ export class GdmLiveAudio extends LitElement {
         if (msg.type === 'status' && msg.status) {
           this.updateStatus(msg.status);
         } else if (msg.type === 'error' && msg.message) {
+          this.isProcessing = false;
           this.updateError(msg.message);
+        } else if (msg.type === 'inputTranscript' && msg.text) {
+          this.isProcessing = true;
+          this.appendTranscript('user', msg.text);
+        } else if (msg.type === 'outputTranscript' && msg.text) {
+          this.isProcessing = true;
+          this.appendTranscript('ella', msg.text);
         } else if (msg.type === 'audio' && msg.data) {
+          this.isProcessing = true;
           this.nextStartTime = Math.max(
             this.nextStartTime,
             this.outputAudioContext.currentTime,
@@ -237,24 +477,39 @@ export class GdmLiveAudio extends LitElement {
           source.connect(this.outputNode);
           source.addEventListener('ended', () => {
             this.sources.delete(source);
+            if (this.sources.size === 0) {
+              this.isProcessing = false;
+              if (!this.isRecording) {
+                this.updateStatus('Session Active');
+              }
+            }
           });
 
           source.start(this.nextStartTime);
           this.nextStartTime = this.nextStartTime + audioBuffer.duration;
           this.sources.add(source);
+        } else if (msg.type === 'turnComplete') {
+          this.finalizeMessages();
+          if (this.sources.size === 0) {
+            this.isProcessing = false;
+          }
         } else if (msg.type === 'interrupted') {
           this.stopOutputAudio();
+          this.finalizeMessages();
+          this.isProcessing = false;
         }
       };
 
       ws.onerror = () => {
         if (this.ws !== ws) return;
+        this.isProcessing = false;
         this.updateError('Failed to connect to the session.');
       };
 
       ws.onclose = (e: CloseEvent) => {
         if (this.ws !== ws) return;
         this.ws = null;
+        this.isProcessing = false;
         if (!this.error) {
           this.updateStatus(
             'Session Closed: ' + (e.reason || 'Disconnected'),
@@ -263,6 +518,7 @@ export class GdmLiveAudio extends LitElement {
       };
     } catch (e) {
       console.error(e);
+      this.isProcessing = false;
       this.updateError('Failed to connect to the session.');
     }
   }
@@ -360,6 +616,8 @@ export class GdmLiveAudio extends LitElement {
 
   private reset() {
     this.stopOutputAudio();
+    this.messages = [];
+    this.isProcessing = false;
     this.initSession();
     this.updateStatus('Session Reset');
   }
@@ -369,9 +627,87 @@ export class GdmLiveAudio extends LitElement {
     this.orbStyle = select.value as OrbStyle;
   }
 
+  private toggleHistory() {
+    this.isHistoryOpen = !this.isHistoryOpen;
+  }
+
+  private handleTextInput(e: Event) {
+    const input = e.target as HTMLInputElement;
+    this.textInput = input.value;
+  }
+
+  private async handleTextSubmit(e: Event) {
+    e.preventDefault();
+    const text = this.textInput.trim();
+    if (!text) return;
+
+    this.textInput = '';
+    this.finalizeMessages();
+    this.messages = [
+      ...this.messages,
+      {id: this.nextMessageId++, role: 'user', text, final: true},
+    ];
+    this.isProcessing = true;
+    this.stopOutputAudio();
+    await this.outputAudioContext.resume();
+
+    if (
+      !this.ws ||
+      (this.ws.readyState !== WebSocket.OPEN &&
+        this.ws.readyState !== WebSocket.CONNECTING)
+    ) {
+      this.pendingTextQueue.push(text);
+      this.initSession();
+      this.updateStatus('Connecting...');
+      return;
+    }
+
+    if (this.ws.readyState === WebSocket.CONNECTING) {
+      this.pendingTextQueue.push(text);
+      return;
+    }
+
+    this.ws.send(JSON.stringify({type: 'text', text}));
+    if (!this.isRecording) {
+      this.updateStatus('Responding...');
+    }
+  }
+
   render() {
+    const isInputActive = this.isRecording || this.isProcessing;
+
     return html`
       <div>
+        <div class="chat-history ${this.isHistoryOpen ? '' : 'collapsed'}">
+          <div class="chat-header">
+            <span>Chat-Verlauf · Ella</span>
+            <button
+              class="history-toggle"
+              type="button"
+              @click=${this.toggleHistory}>
+              ${this.isHistoryOpen ? 'Ausblenden' : 'Anzeigen'}
+            </button>
+          </div>
+          ${this.isHistoryOpen
+            ? html`
+                <div class="chat-messages">
+                  ${this.messages.length === 0
+                    ? html`<p class="chat-empty">Noch keine Nachrichten. Sprich oder schreib Ella.</p>`
+                    : this.messages.map(
+                        (m) => html`
+                          <div class="chat-message ${m.role}">
+                            <span class="chat-role">
+                              ${m.role === 'user' ? 'Du' : 'Ella'}
+                            </span>
+                            <span>${m.text}</span>
+                          </div>
+                        `,
+                      )}
+                </div>
+              `
+            : ''}
+        </div>
+
         <div class="controls">
           <div class="voice-selector">
             <label for="orb-select">Orb Style</label>
@@ -393,6 +729,33 @@ export class GdmLiveAudio extends LitElement {
               </option>
             </select>
           </div>
+
+          <form
+            class="text-input-form ${isInputActive ? 'active' : ''}"
+            @submit=${this.handleTextSubmit}>
+            <input
+              id="text-input"
+              type="text"
+              .value=${this.textInput}
+              @input=${this.handleTextInput}
+              placeholder="Nachricht an Ella..."
+              autocomplete="off"
+              aria-label="Nachricht an Ella" />
+            <button
+              class="send-button"
+              type="submit"
+              title="Nachricht senden"
+              ?disabled=${!this.textInput.trim()}>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="20px"
+                viewBox="0 -960 960 960"
+                width="20px"
+                fill="#ffffff">
+                <path d="M120-160v-640l760 320-760 320Zm80-120 474-200-474-200v140l240 60-240 60v140Zm0 0v-400 400Z" />
+              </svg>
+            </button>
+          </form>
 
           <div class="button-group">
             <button
