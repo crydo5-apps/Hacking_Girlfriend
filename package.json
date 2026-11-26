@@ -1,0 +1,28 @@
+{
+  "name": "audio-orb",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development node server.ts",
+    "build": "vite build",
+    "start": "node server.ts",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^3.6.1",
+    "@lit/context": "^1.1.5",
+    "@types/express": "^5.0.6",
+    "@types/ws": "^8.18.2",
+    "express": "^5.3.0",
+    "lit": "^3.3.0",
+    "three": "^0.176.0",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Audio Orb",
+  "description": "Speak, and the orb responds. An interactive experience with multiple personas, including a strict persona and a charming French-German voice.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "prompt": ""
+}
