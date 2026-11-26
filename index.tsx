@@ -38,7 +38,10 @@ export class GdmLiveAudio extends LitElement {
   @state() terminalTheme: TerminalTheme = 'matrix';
   @state() messages: ChatMessage[] = [];
   @state() isHistoryOpen = true;
+  @state() private isGlitching = false;
 
+  private glitchTimeoutId: number | null = null;
+  private glitchResetTimeoutId: number | null = null;
   private nextMessageId = 1;
   private ws: WebSocket | null = null;
   private pendingTextQueue: string[] = [];
@@ -124,6 +127,140 @@ export class GdmLiveAudio extends LitElement {
       --term-scanline: 1;
     }
 
+    .glitch-overlay {
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      z-index: 4;
+      opacity: 0;
+      overflow: hidden;
+      background:
+        repeating-linear-gradient(
+          0deg,
+          transparent 0px,
+          transparent 18px,
+          var(--term-glow) 19px,
+          transparent 21px
+        );
+    }
+
+    .glitch-overlay::before,
+    .glitch-overlay::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .glitch-overlay::before {
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--term-glow) 22%,
+        rgba(255, 48, 96, 0.14) 48%,
+        transparent 72%,
+        var(--term-glow) 100%
+      );
+    }
+
+    .glitch-overlay::after {
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 6px,
+        rgba(255, 255, 255, 0.06) 7px,
+        transparent 9px
+      );
+    }
+
+    @keyframes terminalGlitchBurst {
+      0% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0);
+      }
+      15% {
+        opacity: 0.72;
+        transform: translate3d(-5px, 1px, 0);
+      }
+      32% {
+        opacity: 0.25;
+        transform: translate3d(6px, -1px, 0);
+      }
+      55% {
+        opacity: 0.85;
+        transform: translate3d(-3px, 0, 0);
+      }
+      78% {
+        opacity: 0.35;
+        transform: translate3d(4px, 1px, 0);
+      }
+      100% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0);
+      }
+    }
+
+    @keyframes terminalGlitchSliceA {
+      0%,
+      100% {
+        opacity: 0;
+        clip-path: inset(12% 0 78% 0);
+        transform: translateX(0);
+      }
+      20% {
+        opacity: 0.9;
+        clip-path: inset(14% 0 76% 0);
+        transform: translateX(-14px);
+      }
+      50% {
+        opacity: 0.75;
+        clip-path: inset(62% 0 26% 0);
+        transform: translateX(12px);
+      }
+      80% {
+        opacity: 0.85;
+        clip-path: inset(34% 0 58% 0);
+        transform: translateX(-8px);
+      }
+    }
+
+    @keyframes terminalGlitchSliceB {
+      0%,
+      100% {
+        opacity: 0;
+        clip-path: inset(70% 0 18% 0);
+        transform: translateX(0);
+      }
+      25% {
+        opacity: 0.85;
+        clip-path: inset(72% 0 18% 0);
+        transform: translateX(16px);
+      }
+      60% {
+        opacity: 0.65;
+        clip-path: inset(22% 0 68% 0);
+        transform: translateX(-12px);
+      }
+      85% {
+        opacity: 0.9;
+        clip-path: inset(82% 0 9% 0);
+        transform: translateX(9px);
+      }
+    }
+
+    .glitch-overlay.active {
+      animation: terminalGlitchBurst 0.26s steps(2, end) forwards;
+    }
+
+    .glitch-overlay.active::before {
+      animation: terminalGlitchSliceA 0.26s steps(2, end) forwards;
+    }
+
+    .glitch-overlay.active::after {
+      animation: terminalGlitchSliceB 0.26s steps(2, end) forwards;
+    }
+
     .scanline-overlay {
       pointer-events: none;
       position: fixed;
@@ -137,6 +274,20 @@ export class GdmLiveAudio extends LitElement {
         rgba(0, 0, 0, 0.55) 3px
       );
       transition: opacity 0.3s ease;
+    }
+
+    .scanline-overlay.glitching {
+      opacity: calc(max(var(--term-scanline), 0.65) * 0.32);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .glitch-overlay,
+      .glitch-overlay.active,
+      .glitch-overlay.active::before,
+      .glitch-overlay.active::after {
+        animation: none !important;
+        opacity: 0 !important;
+      }
     }
 
     #status {
@@ -471,6 +622,52 @@ export class GdmLiveAudio extends LitElement {
       // Ignore storage access restrictions
     }
     this.initClient();
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.scheduleNextGlitch();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.glitchTimeoutId !== null) {
+      window.clearTimeout(this.glitchTimeoutId);
+      this.glitchTimeoutId = null;
+    }
+    if (this.glitchResetTimeoutId !== null) {
+      window.clearTimeout(this.glitchResetTimeoutId);
+      this.glitchResetTimeoutId = null;
+    }
+  }
+
+  private scheduleNextGlitch() {
+    if (this.glitchTimeoutId !== null) {
+      window.clearTimeout(this.glitchTimeoutId);
+    }
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return;
+    }
+    const delay = 4500 + Math.random() * 7000;
+    this.glitchTimeoutId = window.setTimeout(() => {
+      this.triggerGlitchBurst();
+    }, delay);
+  }
+
+  private triggerGlitchBurst() {
+    this.isGlitching = true;
+    const duration = 170 + Math.random() * 140;
+    if (this.glitchResetTimeoutId !== null) {
+      window.clearTimeout(this.glitchResetTimeoutId);
+    }
+    this.glitchResetTimeoutId = window.setTimeout(() => {
+      this.isGlitching = false;
+      this.glitchResetTimeoutId = null;
+      this.scheduleNextGlitch();
+    }, duration);
   }
 
   private initAudio() {
@@ -836,7 +1033,11 @@ export class GdmLiveAudio extends LitElement {
 
     return html`
       <div class="app-shell theme-${this.terminalTheme}">
-        <div class="scanline-overlay"></div>
+        <div
+          class="glitch-overlay ${this.isGlitching ? 'active' : ''}"
+          aria-hidden="true"></div>
+        <div
+          class="scanline-overlay ${this.isGlitching ? 'glitching' : ''}"></div>
 
         <div class="chat-history ${this.isHistoryOpen ? '' : 'collapsed'}">
           <div class="chat-header">
@@ -988,7 +1189,9 @@ export class GdmLiveAudio extends LitElement {
         <gdm-live-audio-visuals-3d
           .inputNode=${this.inputNode}
           .outputNode=${this.outputNode}
-          .orbStyle=${this.orbStyle}></gdm-live-audio-visuals-3d>
+          .orbStyle=${this.orbStyle}
+          .glitchActive=${this.isGlitching}
+          .terminalTheme=${this.terminalTheme}></gdm-live-audio-visuals-3d>
       </div>
     `;
   }

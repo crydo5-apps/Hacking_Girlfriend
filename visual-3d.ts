@@ -58,6 +58,12 @@ export class GdmLiveAudioVisuals3D extends LitElement {
   @property({type: String})
   orbStyle: OrbStyle = 'reactive';
 
+  @property({type: Boolean})
+  glitchActive = false;
+
+  @property({type: String})
+  terminalTheme = 'matrix';
+
   private _outputNode!: AudioNode;
 
   @property()
@@ -128,6 +134,8 @@ export class GdmLiveAudioVisuals3D extends LitElement {
         uniforms: {
           resolution: {value: new THREE.Vector2(1, 1)},
           rand: {value: 0},
+          glitch: {value: 0},
+          glitchColor: {value: new THREE.Vector3(0.0, 1.0, 0.4)},
         },
         vertexShader: backdropVS,
         fragmentShader: backdropFS,
@@ -285,6 +293,20 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     const sphereMaterial = this.sphereMaterial;
 
     backdropMaterial.uniforms.rand.value = Math.random() * 10000;
+    backdropMaterial.uniforms.glitch.value = this.glitchActive
+      ? 0.65 + Math.random() * 0.35
+      : 0;
+
+    const glitchColor = backdropMaterial.uniforms.glitchColor.value as THREE.Vector3;
+    if (this.terminalTheme === 'amber') {
+      glitchColor.set(1.0, 0.69, 0.0);
+    } else if (this.terminalTheme === 'cyber') {
+      glitchColor.set(0.0, 0.9, 1.0);
+    } else if (this.terminalTheme === 'default') {
+      glitchColor.set(0.65, 0.55, 0.98);
+    } else {
+      glitchColor.set(0.0, 1.0, 0.4);
+    }
 
     const inLow = this.inputAnalyser ? this.inputAnalyser.data[0] / 255 : 0;
     const inMid = this.inputAnalyser ? this.inputAnalyser.data[1] / 255 : 0;
