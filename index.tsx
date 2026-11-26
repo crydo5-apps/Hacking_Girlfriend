@@ -11,6 +11,15 @@ import {createBlob, decode, decodeAudioData} from './utils';
 import './visual-3d';
 import type {OrbStyle} from './visual-3d';
 
+type TerminalTheme = 'matrix' | 'amber' | 'cyber' | 'default';
+
+const TERMINAL_THEMES: {id: TerminalTheme; label: string}[] = [
+  {id: 'matrix', label: 'Matrix-Grün'},
+  {id: 'amber', label: 'Bernstein'},
+  {id: 'cyber', label: 'Cyber-Blau'},
+  {id: 'default', label: 'Standard'},
+];
+
 interface ChatMessage {
   id: number;
   role: 'user' | 'ella';
@@ -26,6 +35,7 @@ export class GdmLiveAudio extends LitElement {
   @state() error = '';
   @state() textInput = '';
   @state() orbStyle: OrbStyle = 'reactive';
+  @state() terminalTheme: TerminalTheme = 'matrix';
   @state() messages: ChatMessage[] = [];
   @state() isHistoryOpen = true;
 
@@ -46,6 +56,89 @@ export class GdmLiveAudio extends LitElement {
   private sources = new Set<AudioBufferSourceNode>();
 
   static styles = css`
+    .app-shell {
+      --term-font: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      --term-text: #ffffff;
+      --term-muted: rgba(255, 255, 255, 0.65);
+      --term-accent: #a78bfa;
+      --term-bg: rgba(16, 12, 20, 0.52);
+      --term-surface: rgba(255, 255, 255, 0.1);
+      --term-surface-hover: rgba(255, 255, 255, 0.18);
+      --term-border: rgba(255, 255, 255, 0.2);
+      --term-border-strong: rgba(255, 255, 255, 0.45);
+      --term-glow: rgba(167, 139, 250, 0.18);
+      --term-user-bg: rgba(255, 255, 255, 0.14);
+      --term-ella-bg: rgba(124, 58, 237, 0.22);
+      --term-ella-border: rgba(167, 139, 250, 0.28);
+      --term-scanline: 0;
+    }
+
+    .app-shell.theme-matrix {
+      --term-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --term-text: #b9ffd0;
+      --term-muted: rgba(0, 255, 102, 0.7);
+      --term-accent: #00ff66;
+      --term-bg: rgba(3, 18, 9, 0.72);
+      --term-surface: rgba(0, 255, 102, 0.08);
+      --term-surface-hover: rgba(0, 255, 102, 0.18);
+      --term-border: rgba(0, 255, 102, 0.34);
+      --term-border-strong: rgba(0, 255, 102, 0.72);
+      --term-glow: rgba(0, 255, 102, 0.24);
+      --term-user-bg: rgba(0, 255, 102, 0.12);
+      --term-ella-bg: rgba(0, 180, 72, 0.2);
+      --term-ella-border: rgba(0, 255, 102, 0.4);
+      --term-scanline: 1;
+    }
+
+    .app-shell.theme-amber {
+      --term-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --term-text: #ffe4ad;
+      --term-muted: rgba(255, 176, 0, 0.72);
+      --term-accent: #ffb000;
+      --term-bg: rgba(20, 11, 2, 0.74);
+      --term-surface: rgba(255, 176, 0, 0.09);
+      --term-surface-hover: rgba(255, 176, 0, 0.19);
+      --term-border: rgba(255, 176, 0, 0.36);
+      --term-border-strong: rgba(255, 196, 54, 0.75);
+      --term-glow: rgba(255, 176, 0, 0.24);
+      --term-user-bg: rgba(255, 176, 0, 0.13);
+      --term-ella-bg: rgba(190, 105, 0, 0.22);
+      --term-ella-border: rgba(255, 176, 0, 0.42);
+      --term-scanline: 1;
+    }
+
+    .app-shell.theme-cyber {
+      --term-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --term-text: #c4f7ff;
+      --term-muted: rgba(0, 229, 255, 0.72);
+      --term-accent: #00e5ff;
+      --term-bg: rgba(2, 16, 26, 0.74);
+      --term-surface: rgba(0, 229, 255, 0.08);
+      --term-surface-hover: rgba(0, 229, 255, 0.18);
+      --term-border: rgba(0, 229, 255, 0.35);
+      --term-border-strong: rgba(0, 229, 255, 0.75);
+      --term-glow: rgba(0, 229, 255, 0.24);
+      --term-user-bg: rgba(0, 229, 255, 0.12);
+      --term-ella-bg: rgba(0, 132, 209, 0.22);
+      --term-ella-border: rgba(0, 229, 255, 0.42);
+      --term-scanline: 1;
+    }
+
+    .scanline-overlay {
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      opacity: calc(var(--term-scanline) * 0.16);
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 2px,
+        rgba(0, 0, 0, 0.55) 3px
+      );
+      transition: opacity 0.3s ease;
+    }
+
     #status {
       position: absolute;
       bottom: 2.5vh;
@@ -53,10 +146,11 @@ export class GdmLiveAudio extends LitElement {
       right: 0;
       z-index: 10;
       text-align: center;
-      color: rgba(255, 255, 255, 0.7);
-      font-family: sans-serif;
-      font-size: 14px;
+      color: var(--term-muted);
+      font-family: var(--term-font);
+      font-size: 13px;
       pointer-events: none;
+      transition: color 0.25s ease;
     }
 
     .controls {
@@ -70,6 +164,14 @@ export class GdmLiveAudio extends LitElement {
       align-items: center;
       justify-content: center;
       flex-direction: column;
+      gap: 14px;
+    }
+
+    .top-controls {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      flex-wrap: wrap;
       gap: 14px;
     }
 
@@ -90,12 +192,13 @@ export class GdmLiveAudio extends LitElement {
       top: 20px;
       left: 20px;
       width: min(360px, calc(100vw - 40px));
-      background: rgba(16, 12, 20, 0.52);
+      background: var(--term-bg);
       backdrop-filter: blur(14px);
-      border: 1px solid rgba(255, 255, 255, 0.16);
+      border: 1px solid var(--term-border);
+      box-shadow: 0 0 24px var(--term-glow);
       border-radius: 16px;
-      color: white;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--term-text);
+      font-family: var(--term-font);
       overflow: hidden;
       box-sizing: border-box;
       transition: all 0.25s ease;
@@ -106,11 +209,11 @@ export class GdmLiveAudio extends LitElement {
       align-items: center;
       justify-content: space-between;
       padding: 10px 14px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom: 1px solid var(--term-border);
       font-size: 12px;
       letter-spacing: 0.8px;
       text-transform: uppercase;
-      color: rgba(255, 255, 255, 0.82);
+      color: var(--term-accent);
     }
 
     .chat-history.collapsed .chat-header {
@@ -122,12 +225,13 @@ export class GdmLiveAudio extends LitElement {
       height: auto;
       border-radius: 8px;
       padding: 4px 10px;
+      font-family: var(--term-font);
       font-size: 11px;
       letter-spacing: 0.5px;
       text-transform: uppercase;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      color: rgba(255, 255, 255, 0.85);
+      background: var(--term-surface);
+      border: 1px solid var(--term-border);
+      color: var(--term-text);
     }
 
     .chat-messages {
@@ -138,12 +242,12 @@ export class GdmLiveAudio extends LitElement {
       flex-direction: column;
       gap: 10px;
       scrollbar-width: thin;
-      scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+      scrollbar-color: var(--term-border) transparent;
     }
 
     .chat-empty {
       font-size: 13px;
-      color: rgba(255, 255, 255, 0.45);
+      color: var(--term-muted);
       margin: 4px 0;
     }
 
@@ -161,15 +265,15 @@ export class GdmLiveAudio extends LitElement {
     .chat-message.user {
       align-self: flex-end;
       max-width: 85%;
-      background: rgba(255, 255, 255, 0.14);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: var(--term-user-bg);
+      border: 1px solid var(--term-border);
     }
 
     .chat-message.ella {
       align-self: flex-start;
       max-width: 88%;
-      background: rgba(124, 58, 237, 0.22);
-      border: 1px solid rgba(167, 139, 250, 0.28);
+      background: var(--term-ella-bg);
+      border: 1px solid var(--term-ella-border);
     }
 
     .chat-role {
@@ -177,7 +281,7 @@ export class GdmLiveAudio extends LitElement {
       font-weight: 600;
       letter-spacing: 0.7px;
       text-transform: uppercase;
-      color: rgba(255, 255, 255, 0.6);
+      color: var(--term-accent);
     }
 
     .text-input-form {
@@ -186,9 +290,9 @@ export class GdmLiveAudio extends LitElement {
       gap: 10px;
       width: 100%;
       max-width: 440px;
-      background: rgba(255, 255, 255, 0.1);
+      background: var(--term-bg);
       backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      border: 1px solid var(--term-border);
       border-radius: 16px;
       padding: 6px 6px 6px 16px;
       box-sizing: border-box;
@@ -200,16 +304,16 @@ export class GdmLiveAudio extends LitElement {
       &:focus-within {
         opacity: 1;
         transform: translateY(0);
-        background: rgba(255, 255, 255, 0.15);
-        border-color: rgba(255, 255, 255, 0.45);
+        border-color: var(--term-border-strong);
+        box-shadow: 0 0 22px var(--term-glow);
       }
 
       &.active {
         opacity: 1;
         transform: translateY(0);
         animation: inputFadeIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-        border-color: rgba(255, 255, 255, 0.36);
-        box-shadow: 0 0 20px rgba(167, 139, 250, 0.15);
+        border-color: var(--term-border-strong);
+        box-shadow: 0 0 24px var(--term-glow);
       }
 
       input {
@@ -218,12 +322,12 @@ export class GdmLiveAudio extends LitElement {
         background: transparent;
         border: none;
         outline: none;
-        color: white;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        color: var(--term-text);
+        font-family: var(--term-font);
         font-size: 14px;
 
         &::placeholder {
-          color: rgba(255, 255, 255, 0.55);
+          color: var(--term-muted);
         }
       }
 
@@ -232,8 +336,9 @@ export class GdmLiveAudio extends LitElement {
         height: 40px;
         flex-shrink: 0;
         border-radius: 50%;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        background: rgba(255, 255, 255, 0.14);
+        border: 1px solid var(--term-border);
+        background: var(--term-surface);
+        color: var(--term-accent);
       }
     }
 
@@ -257,44 +362,74 @@ export class GdmLiveAudio extends LitElement {
       flex-direction: column;
       align-items: center;
       gap: 8px;
-      color: white;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--term-accent);
+      font-family: var(--term-font);
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 1px;
 
       select {
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--term-bg);
         backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        color: white;
+        border: 1px solid var(--term-border);
+        color: var(--term-text);
         padding: 8px 16px;
         border-radius: 20px;
         outline: none;
         cursor: pointer;
+        font-family: var(--term-font);
         font-size: 14px;
         transition: all 0.3s ease;
         min-width: 140px;
         text-align: center;
 
         &:hover {
-          background: rgba(255, 255, 255, 0.2);
-          border-color: rgba(255, 255, 255, 0.4);
+          background: var(--term-surface-hover);
+          border-color: var(--term-border-strong);
         }
 
         option {
-          background: #1a1620;
-          color: white;
+          background: #100c14;
+          color: #ffffff;
         }
       }
     }
 
+    .theme-button {
+      width: auto;
+      height: 38px;
+      border-radius: 20px;
+      padding: 0 16px;
+      gap: 8px;
+      font-family: var(--term-font);
+      font-size: 13px;
+      background: var(--term-bg);
+      border: 1px solid var(--term-border);
+      color: var(--term-text);
+      box-shadow: 0 0 16px var(--term-glow);
+
+      &:hover:not([disabled]) {
+        background: var(--term-surface-hover);
+        border-color: var(--term-border-strong);
+        transform: translateY(-1px);
+      }
+    }
+
+    .theme-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--term-accent);
+      box-shadow: 0 0 8px var(--term-accent);
+      flex-shrink: 0;
+    }
+
     button {
       outline: none;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: white;
+      border: 1px solid var(--term-border);
+      color: var(--term-text);
       border-radius: 50%;
-      background: rgba(255, 255, 255, 0.1);
+      background: var(--term-surface);
       backdrop-filter: blur(10px);
       width: 64px;
       height: 64px;
@@ -308,7 +443,8 @@ export class GdmLiveAudio extends LitElement {
       transition: all 0.3s ease;
 
       &:hover:not([disabled]) {
-        background: rgba(255, 255, 255, 0.2);
+        background: var(--term-surface-hover);
+        border-color: var(--term-border-strong);
         transform: scale(1.05);
       }
 
@@ -326,6 +462,14 @@ export class GdmLiveAudio extends LitElement {
 
   constructor() {
     super();
+    try {
+      const saved = localStorage.getItem('ella-terminal-theme') as TerminalTheme | null;
+      if (saved && TERMINAL_THEMES.some((t) => t.id === saved)) {
+        this.terminalTheme = saved;
+      }
+    } catch {
+      // Ignore storage access restrictions
+    }
     this.initClient();
   }
 
@@ -631,6 +775,17 @@ export class GdmLiveAudio extends LitElement {
     this.isHistoryOpen = !this.isHistoryOpen;
   }
 
+  private cycleTerminalTheme() {
+    const idx = TERMINAL_THEMES.findIndex((t) => t.id === this.terminalTheme);
+    const next = TERMINAL_THEMES[(idx + 1) % TERMINAL_THEMES.length];
+    this.terminalTheme = next.id;
+    try {
+      localStorage.setItem('ella-terminal-theme', next.id);
+    } catch {
+      // Ignore storage access restrictions
+    }
+  }
+
   private handleTextInput(e: Event) {
     const input = e.target as HTMLInputElement;
     this.textInput = input.value;
@@ -675,9 +830,14 @@ export class GdmLiveAudio extends LitElement {
 
   render() {
     const isInputActive = this.isRecording || this.isProcessing;
+    const currentThemeLabel =
+      TERMINAL_THEMES.find((t) => t.id === this.terminalTheme)?.label ??
+      'Matrix-Grün';
 
     return html`
-      <div>
+      <div class="app-shell theme-${this.terminalTheme}">
+        <div class="scanline-overlay"></div>
+
         <div class="chat-history ${this.isHistoryOpen ? '' : 'collapsed'}">
           <div class="chat-header">
             <span>Chat-Verlauf · Ella</span>
@@ -709,25 +869,40 @@ export class GdmLiveAudio extends LitElement {
         </div>
 
         <div class="controls">
-          <div class="voice-selector">
-            <label for="orb-select">Orb Style</label>
-            <select id="orb-select" @change=${this.handleOrbChange}>
-              <option value="reactive" ?selected=${this.orbStyle === 'reactive'}>
-                Reaktiv (Jetzt)
-              </option>
-              <option value="classic" ?selected=${this.orbStyle === 'classic'}>
-                Klassisch (Vorher)
-              </option>
-              <option value="cyber-grid" ?selected=${this.orbStyle === 'cyber-grid'}>
-                Cyber Grid (Jarvis)
-              </option>
-              <option value="solar-flare" ?selected=${this.orbStyle === 'solar-flare'}>
-                Solar Flare (Plasma)
-              </option>
-              <option value="crimson-pulse" ?selected=${this.orbStyle === 'crimson-pulse'}>
-                Crimson Pulse (Laser)
-              </option>
-            </select>
+          <div class="top-controls">
+            <div class="voice-selector">
+              <label for="orb-select">Orb Style</label>
+              <select id="orb-select" @change=${this.handleOrbChange}>
+                <option value="reactive" ?selected=${this.orbStyle === 'reactive'}>
+                  Reaktiv (Jetzt)
+                </option>
+                <option value="classic" ?selected=${this.orbStyle === 'classic'}>
+                  Klassisch (Vorher)
+                </option>
+                <option value="cyber-grid" ?selected=${this.orbStyle === 'cyber-grid'}>
+                  Cyber Grid (Jarvis)
+                </option>
+                <option value="solar-flare" ?selected=${this.orbStyle === 'solar-flare'}>
+                  Solar Flare (Plasma)
+                </option>
+                <option value="crimson-pulse" ?selected=${this.orbStyle === 'crimson-pulse'}>
+                  Crimson Pulse (Laser)
+                </option>
+              </select>
+            </div>
+
+            <div class="voice-selector">
+              <label>Terminal-Farbe</label>
+              <button
+                id="themeButton"
+                class="theme-button"
+                type="button"
+                title="Hacker-Terminal-Farbe umschalten"
+                @click=${this.cycleTerminalTheme}>
+                <span class="theme-dot"></span>
+                <span>${currentThemeLabel}</span>
+              </button>
+            </div>
           </div>
 
           <form
@@ -751,7 +926,7 @@ export class GdmLiveAudio extends LitElement {
                 height="20px"
                 viewBox="0 -960 960 960"
                 width="20px"
-                fill="#ffffff">
+                fill="currentColor">
                 <path d="M120-160v-640l760 320-760 320Zm80-120 474-200-474-200v140l240 60-240 60v140Zm0 0v-400 400Z" />
               </svg>
             </button>
